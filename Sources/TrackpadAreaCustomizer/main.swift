@@ -254,6 +254,7 @@ private final class ClickRemapper {
 
     private var eventTap: CFMachPort?
     private var source: CFRunLoopSource?
+    private var pendingCommandForCurrentClick = false
 
     private struct ClickDecision {
         let shouldApplyCommand: Bool
@@ -278,11 +279,12 @@ private final class ClickRemapper {
         }
 
         let leftDownMask = CGEventMask(1 << CGEventType.leftMouseDown.rawValue)
+        let leftUpMask = CGEventMask(1 << CGEventType.leftMouseUp.rawValue)
         guard let tap = CGEvent.tapCreate(
-            tap: .cgSessionEventTap,
+            tap: .cghidEventTap,
             place: .headInsertEventTap,
             options: .defaultTap,
-            eventsOfInterest: leftDownMask,
+            eventsOfInterest: leftDownMask | leftUpMask,
             callback: ClickRemapper.eventTapCallback,
             userInfo: UnsafeMutableRawPointer(Unmanaged.passUnretained(self).toOpaque())
         ) else {
@@ -345,6 +347,7 @@ private final class ClickRemapper {
             if let eventTap {
                 CGEvent.tapEnable(tap: eventTap, enable: true)
             }
+            pendingCommandForCurrentClick = false
             debugLog("eventTap was disabled; re-enabled")
             return Unmanaged.passUnretained(event)
         }
@@ -352,11 +355,22 @@ private final class ClickRemapper {
         if type == .leftMouseDown {
             let decision = evaluateClick()
             debugLog(decision.debugMessage)
+            pendingCommandForCurrentClick = decision.shouldApplyCommand
             if decision.shouldApplyCommand {
                 var flags = event.flags
                 flags.insert(.maskCommand)
                 event.flags = flags
             }
+        } else if type == .leftMouseUp {
+            if pendingCommandForCurrentClick {
+                var flags = event.flags
+                flags.insert(.maskCommand)
+                event.flags = flags
+                debugLog("leftMouseUp: applyCmd=true (from leftMouseDown)")
+            } else {
+                debugLog("leftMouseUp: applyCmd=false")
+            }
+            pendingCommandForCurrentClick = false
         }
 
         return Unmanaged.passUnretained(event)
