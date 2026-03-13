@@ -1,13 +1,15 @@
 # trackpad-area-customizer
 
-Mac のトラックパッド座標を使って、左クリックを `Cmd+クリック` に変換する常駐ツールです。  
+Mac のトラックパッド座標を使って、左クリックを変換する常駐ツールです。  
 この実装では「トラックパッドの指定した隅ゾーン」で押したクリックのみを変換します。
 
 ## 仕組み
 
 - `MultitouchSupport` (Private Framework) からトラックパッドの正規化座標 (0.0-1.0) を取得
 - `CGEventTap` で左クリック (`leftMouseDown`) をフック
-- 座標が指定ゾーン内なら `Cmd` フラグを付けてイベントを通す
+- 座標が指定ゾーン内なら以下いずれかを実行
+  - 既定: `Cmd+クリック` として通す
+  - `--shortcut` 指定時: 指定ショートカットを送出する
 
 ## 前提
 
@@ -50,6 +52,7 @@ swift run trackpad-area-customizer --debug
 --zone-height <0.0-1.0>     コーナーゾーンの縦幅比率 (default: 0.33)
 --corner <name>             top-left|top-right|bottom-left|bottom-right (default: top-left)
 --max-touch-age-ms <ms>     クリック判定で使うタッチ情報の最大経過時間 (default: 120)
+--shortcut <combo>          Cmd+クリックの代わりにショートカットを送出 (例: cmd+c)
 --debug                     クリックイベントごとのデバッグログを出力
 --help
 ```
@@ -64,6 +67,12 @@ swift run trackpad-area-customizer --debug
 
 ```bash
 .build/release/trackpad-area-customizer --corner bottom-right --zone-width 0.2 --zone-height 0.25
+```
+
+例: 右下 20% x 25% を押したら `Cmd+C` を送出
+
+```bash
+.build/release/trackpad-area-customizer --corner bottom-right --zone-width 0.2 --zone-height 0.25 --shortcut cmd+c
 ```
 
 デバッグログを有効化:

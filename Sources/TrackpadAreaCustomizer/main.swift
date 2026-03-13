@@ -160,9 +160,10 @@ private final class ClickRemapper {
     private var eventTap: CFMachPort?
     private var source: CFRunLoopSource?
     private var pendingCommandForCurrentClick = false
+    private var pendingSuppressedClick = false
 
     private struct ClickDecision {
-        let shouldApplyCommand: Bool
+        let isInTriggerZone: Bool
         let debugMessage: String
     }
 
@@ -207,7 +208,7 @@ private final class ClickRemapper {
         print(
             "Running: zoneWidth=\(config.zoneWidthRatio), zoneHeight=\(config.zoneHeightRatio), " +
                 "corner=\(config.corner.rawValue), maxTouchAgeMs=\(config.maxTouchAgeMillis), " +
-                "debug=\(config.debug)"
+                "action=\(config.action.displayString), debug=\(config.debug)"
         )
         return true
     }
@@ -215,7 +216,7 @@ private final class ClickRemapper {
     private func evaluateClick() -> ClickDecision {
         guard let snapshot = touchState.latest(maxAgeMillis: config.maxTouchAgeMillis) else {
             return ClickDecision(
-                shouldApplyCommand: false,
+                isInTriggerZone: false,
                 debugMessage: "leftMouseDown: no recent touch snapshot"
             )
         }
@@ -234,19 +235,42 @@ private final class ClickRemapper {
             isVerticalHit = snapshot.y <= config.zoneHeightRatio
         }
 
-        let shouldApply = isHorizontalHit && isVerticalHit
+        let isInTriggerZone = isHorizontalHit && isVerticalHit
         return ClickDecision(
-            shouldApplyCommand: shouldApply,
+            isInTriggerZone: isInTriggerZone,
             debugMessage: String(
-                format: "leftMouseDown: corner=%@ x=%.3f y=%.3f horizontalHit=%@ verticalHit=%@ applyCmd=%@",
+                format: "leftMouseDown: corner=%@ x=%.3f y=%.3f horizontalHit=%@ verticalHit=%@ trigger=%@",
                 config.corner.rawValue,
                 snapshot.x,
                 snapshot.y,
                 isHorizontalHit ? "true" : "false",
                 isVerticalHit ? "true" : "false",
-                shouldApply ? "true" : "false"
+                isInTriggerZone ? "true" : "false"
             )
         )
+    }
+
+    private func sendShortcut(_ shortcut: KeyboardShortcut) {
+        guard
+            let keyDownEvent = CGEvent(
+                keyboardEventSource: nil,
+                virtualKey: shortcut.keyCode,
+                keyDown: true
+            ),
+            let keyUpEvent = CGEvent(
+                keyboardEventSource: nil,
+                virtualKey: shortcut.keyCode,
+                keyDown: false
+            )
+        else {
+            debugLog("failed to create keyboard events for shortcut=\(shortcut.displayString)")
+            return
+        }
+
+        keyDownEvent.flags = shortcut.flags
+        keyUpEvent.flags = shortcut.flags
+        keyDownEvent.post(tap: .cghidEventTap)
+        keyUpEvent.post(tap: .cghidEventTap)
     }
 
     private func debugLog(_ message: String) {
@@ -262,6 +286,7 @@ private final class ClickRemapper {
                 CGEvent.tapEnable(tap: eventTap, enable: true)
             }
             pendingCommandForCurrentClick = false
+            pendingSuppressedClick = false
             debugLog("eventTap was disabled; re-enabled")
             return Unmanaged.passUnretained(event)
         }
@@ -269,22 +294,45 @@ private final class ClickRemapper {
         if type == .leftMouseDown {
             let decision = evaluateClick()
             debugLog(decision.debugMessage)
-            pendingCommandForCurrentClick = decision.shouldApplyCommand
-            if decision.shouldApplyCommand {
-                var flags = event.flags
-                flags.insert(.maskCommand)
-                event.flags = flags
+
+            switch config.action {
+            case .commandClick:
+                pendingSuppressedClick = false
+                pendingCommandForCurrentClick = decision.isInTriggerZone
+                if decision.isInTriggerZone {
+                    var flags = event.flags
+                    flags.insert(.maskCommand)
+                    event.flags = flags
+                }
+            case .keyboardShortcut(let shortcut):
+                pendingCommandForCurrentClick = false
+                if decision.isInTriggerZone {
+                    sendShortcut(shortcut)
+                    pendingSuppressedClick = true
+                    debugLog("leftMouseDown: sent shortcut=\(shortcut.displayString)")
+                    return nil
+                }
+                pendingSuppressedClick = false
             }
         } else if type == .leftMouseUp {
-            if pendingCommandForCurrentClick {
-                var flags = event.flags
-                flags.insert(.maskCommand)
-                event.flags = flags
-                debugLog("leftMouseUp: applyCmd=true (from leftMouseDown)")
-            } else {
-                debugLog("leftMouseUp: applyCmd=false")
+            switch config.action {
+            case .commandClick:
+                if pendingCommandForCurrentClick {
+                    var flags = event.flags
+                    flags.insert(.maskCommand)
+                    event.flags = flags
+                    debugLog("leftMouseUp: applyCmd=true (from leftMouseDown)")
+                } else {
+                    debugLog("leftMouseUp: applyCmd=false")
+                }
+                pendingCommandForCurrentClick = false
+            case .keyboardShortcut:
+                if pendingSuppressedClick {
+                    pendingSuppressedClick = false
+                    debugLog("leftMouseUp: suppressed (shortcut mode)")
+                    return nil
+                }
             }
-            pendingCommandForCurrentClick = false
         }
 
         return Unmanaged.passUnretained(event)

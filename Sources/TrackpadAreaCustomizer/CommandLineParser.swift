@@ -1,3 +1,4 @@
+import ApplicationServices
 import Foundation
 
 enum Corner: String {
@@ -35,6 +36,7 @@ struct Config {
     let zoneHeightRatio: Double
     let corner: Corner
     let maxTouchAgeMillis: Double
+    let action: TriggerAction
     let debug: Bool
 
     static let `default` = Config(
@@ -42,11 +44,18 @@ struct Config {
         zoneHeightRatio: 0.33,
         corner: .topLeft,
         maxTouchAgeMillis: 120,
+        action: .commandClick,
         debug: false
     )
 
     static func parse() -> Config {
-        var config = Self.default
+        var zoneWidthRatio = Self.default.zoneWidthRatio
+        var zoneHeightRatio = Self.default.zoneHeightRatio
+        var corner = Self.default.corner
+        var maxTouchAgeMillis = Self.default.maxTouchAgeMillis
+        var action = Self.default.action
+        var debug = Self.default.debug
+
         let arguments = Array(CommandLine.arguments.dropFirst())
         var index = 0
 
@@ -64,6 +73,77 @@ struct Config {
             return arguments[nextIndex]
         }
 
+        let keyCodeMap: [String: CGKeyCode] = [
+            "a": 0, "s": 1, "d": 2, "f": 3, "h": 4, "g": 5, "z": 6, "x": 7,
+            "c": 8, "v": 9, "b": 11, "q": 12, "w": 13, "e": 14, "r": 15,
+            "y": 16, "t": 17, "1": 18, "2": 19, "3": 20, "4": 21, "6": 22,
+            "5": 23, "=": 24, "9": 25, "7": 26, "-": 27, "8": 28, "0": 29,
+            "]": 30, "o": 31, "u": 32, "[": 33, "i": 34, "p": 35, "l": 37,
+            "j": 38, "'": 39, "k": 40, ";": 41, "\\": 42, ",": 43, "/": 44,
+            "n": 45, "m": 46, ".": 47, "`": 50, "return": 36, "enter": 36,
+            "space": 49, "tab": 48, "escape": 53, "esc": 53
+        ]
+
+        func parseShortcut(_ rawValue: String) -> KeyboardShortcut {
+            let parts = rawValue
+                .split(separator: "+")
+                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() }
+                .filter { !$0.isEmpty }
+
+            guard !parts.isEmpty else {
+                failParse("Invalid value for --shortcut: \(rawValue)")
+            }
+
+            var flags = CGEventFlags()
+            var hasCommand = false
+            var hasControl = false
+            var hasOption = false
+            var hasShift = false
+            var keyToken: String?
+
+            for part in parts {
+                switch part {
+                case "cmd", "command":
+                    flags.insert(.maskCommand)
+                    hasCommand = true
+                case "ctrl", "control":
+                    flags.insert(.maskControl)
+                    hasControl = true
+                case "opt", "option", "alt":
+                    flags.insert(.maskAlternate)
+                    hasOption = true
+                case "shift":
+                    flags.insert(.maskShift)
+                    hasShift = true
+                default:
+                    if keyToken != nil {
+                        failParse("Invalid value for --shortcut: \(rawValue) (multiple key tokens)")
+                    }
+                    keyToken = part
+                }
+            }
+
+            guard let keyToken else {
+                failParse("Invalid value for --shortcut: \(rawValue) (missing key token)")
+            }
+            guard let keyCode = keyCodeMap[keyToken] else {
+                failParse("Invalid value for --shortcut: \(rawValue) (unknown key: \(keyToken))")
+            }
+
+            var components: [String] = []
+            if hasCommand { components.append("cmd") }
+            if hasControl { components.append("ctrl") }
+            if hasOption { components.append("opt") }
+            if hasShift { components.append("shift") }
+            components.append(keyToken)
+
+            return KeyboardShortcut(
+                keyCode: keyCode,
+                flags: flags,
+                displayString: components.joined(separator: "+")
+            )
+        }
+
         while index < arguments.count {
             let argument = arguments[index]
             switch argument {
@@ -72,57 +152,30 @@ struct Config {
                 guard let ratio = Double(value), ratio > 0, ratio <= 1 else {
                     failParse("Invalid value for --zone-width: \(value) (expected 0.0 < value <= 1.0)")
                 }
-                config = Config(
-                    zoneWidthRatio: ratio,
-                    zoneHeightRatio: config.zoneHeightRatio,
-                    corner: config.corner,
-                    maxTouchAgeMillis: config.maxTouchAgeMillis,
-                    debug: config.debug
-                )
+                zoneWidthRatio = ratio
             case "--zone-height":
                 let value = nextValue(for: argument)
                 guard let ratio = Double(value), ratio > 0, ratio <= 1 else {
                     failParse("Invalid value for --zone-height: \(value) (expected 0.0 < value <= 1.0)")
                 }
-                config = Config(
-                    zoneWidthRatio: config.zoneWidthRatio,
-                    zoneHeightRatio: ratio,
-                    corner: config.corner,
-                    maxTouchAgeMillis: config.maxTouchAgeMillis,
-                    debug: config.debug
-                )
+                zoneHeightRatio = ratio
             case "--corner":
                 let value = nextValue(for: argument)
-                guard let corner = Corner.parse(value) else {
+                guard let parsedCorner = Corner.parse(value) else {
                     failParse("Invalid value for --corner: \(value) (expected top-left|top-right|bottom-left|bottom-right)")
                 }
-                config = Config(
-                    zoneWidthRatio: config.zoneWidthRatio,
-                    zoneHeightRatio: config.zoneHeightRatio,
-                    corner: corner,
-                    maxTouchAgeMillis: config.maxTouchAgeMillis,
-                    debug: config.debug
-                )
+                corner = parsedCorner
             case "--max-touch-age-ms":
                 let value = nextValue(for: argument)
                 guard let millis = Double(value), millis > 0 else {
                     failParse("Invalid value for --max-touch-age-ms: \(value) (expected value > 0)")
                 }
-                config = Config(
-                    zoneWidthRatio: config.zoneWidthRatio,
-                    zoneHeightRatio: config.zoneHeightRatio,
-                    corner: config.corner,
-                    maxTouchAgeMillis: millis,
-                    debug: config.debug
-                )
+                maxTouchAgeMillis = millis
+            case "--shortcut":
+                let value = nextValue(for: argument)
+                action = .keyboardShortcut(parseShortcut(value))
             case "--debug":
-                config = Config(
-                    zoneWidthRatio: config.zoneWidthRatio,
-                    zoneHeightRatio: config.zoneHeightRatio,
-                    corner: config.corner,
-                    maxTouchAgeMillis: config.maxTouchAgeMillis,
-                    debug: true
-                )
+                debug = true
             case "--help":
                 printUsageAndExit()
             default:
@@ -131,7 +184,34 @@ struct Config {
             index += 1
         }
 
-        return config
+        return Config(
+            zoneWidthRatio: zoneWidthRatio,
+            zoneHeightRatio: zoneHeightRatio,
+            corner: corner,
+            maxTouchAgeMillis: maxTouchAgeMillis,
+            action: action,
+            debug: debug
+        )
+    }
+}
+
+struct KeyboardShortcut {
+    let keyCode: CGKeyCode
+    let flags: CGEventFlags
+    let displayString: String
+}
+
+enum TriggerAction {
+    case commandClick
+    case keyboardShortcut(KeyboardShortcut)
+
+    var displayString: String {
+        switch self {
+        case .commandClick:
+            return "cmd-click"
+        case .keyboardShortcut(let shortcut):
+            return "shortcut(\(shortcut.displayString))"
+        }
     }
 }
 
@@ -145,6 +225,7 @@ private func printUsageAndExit(exitCode: Int32 = 0, toStderr: Bool = false) -> N
       --zone-height <0.0-1.0>     Vertical size ratio of the corner zone (default: 0.33)
       --corner <name>             top-left|top-right|bottom-left|bottom-right (default: top-left)
       --max-touch-age-ms <ms>     Max age of touch sample used for click mapping (default: 120)
+      --shortcut <combo>          Send shortcut instead of cmd-click (e.g. cmd+c, cmd+shift+v)
       --debug                     Print debug log for each click event
       --help                      Show this message
     """
