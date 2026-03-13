@@ -1,18 +1,48 @@
 import ApplicationServices
 import Foundation
 
+private enum Corner: String {
+    case topLeft = "top-left"
+    case topRight = "top-right"
+    case bottomLeft = "bottom-left"
+    case bottomRight = "bottom-right"
+
+    var isLeftSide: Bool {
+        self == .topLeft || self == .bottomLeft
+    }
+
+    var isTopSide: Bool {
+        self == .topLeft || self == .topRight
+    }
+
+    static func parse(_ rawValue: String) -> Corner? {
+        switch rawValue.lowercased() {
+        case "top-left", "tl":
+            return .topLeft
+        case "top-right", "tr":
+            return .topRight
+        case "bottom-left", "bl":
+            return .bottomLeft
+        case "bottom-right", "br":
+            return .bottomRight
+        default:
+            return nil
+        }
+    }
+}
+
 private struct Config {
-    let leftZoneRatio: Double
-    let topZoneRatio: Double
+    let zoneWidthRatio: Double
+    let zoneHeightRatio: Double
+    let corner: Corner
     let maxTouchAgeMillis: Double
-    let invertY: Bool
     let debug: Bool
 
     static let `default` = Config(
-        leftZoneRatio: 0.33,
-        topZoneRatio: 0.33,
+        zoneWidthRatio: 0.33,
+        zoneHeightRatio: 0.33,
+        corner: .topLeft,
         maxTouchAgeMillis: 120,
-        invertY: false,
         debug: false
     )
 
@@ -22,50 +52,52 @@ private struct Config {
 
         while let argument = iterator.next() {
             switch argument {
-            case "--left-zone":
+            case "--zone-width":
                 if let value = iterator.next(), let ratio = Double(value), ratio > 0, ratio <= 1 {
                     config = Config(
-                        leftZoneRatio: ratio,
-                        topZoneRatio: config.topZoneRatio,
+                        zoneWidthRatio: ratio,
+                        zoneHeightRatio: config.zoneHeightRatio,
+                        corner: config.corner,
                         maxTouchAgeMillis: config.maxTouchAgeMillis,
-                        invertY: config.invertY,
                         debug: config.debug
                     )
                 }
-            case "--top-zone":
+            case "--zone-height":
                 if let value = iterator.next(), let ratio = Double(value), ratio > 0, ratio <= 1 {
                     config = Config(
-                        leftZoneRatio: config.leftZoneRatio,
-                        topZoneRatio: ratio,
+                        zoneWidthRatio: config.zoneWidthRatio,
+                        zoneHeightRatio: ratio,
+                        corner: config.corner,
                         maxTouchAgeMillis: config.maxTouchAgeMillis,
-                        invertY: config.invertY,
+                        debug: config.debug
+                    )
+                }
+            case "--corner":
+                if let value = iterator.next(), let corner = Corner.parse(value) {
+                    config = Config(
+                        zoneWidthRatio: config.zoneWidthRatio,
+                        zoneHeightRatio: config.zoneHeightRatio,
+                        corner: corner,
+                        maxTouchAgeMillis: config.maxTouchAgeMillis,
                         debug: config.debug
                     )
                 }
             case "--max-touch-age-ms":
                 if let value = iterator.next(), let millis = Double(value), millis > 0 {
                     config = Config(
-                        leftZoneRatio: config.leftZoneRatio,
-                        topZoneRatio: config.topZoneRatio,
+                        zoneWidthRatio: config.zoneWidthRatio,
+                        zoneHeightRatio: config.zoneHeightRatio,
+                        corner: config.corner,
                         maxTouchAgeMillis: millis,
-                        invertY: config.invertY,
                         debug: config.debug
                     )
                 }
-            case "--invert-y":
-                config = Config(
-                    leftZoneRatio: config.leftZoneRatio,
-                    topZoneRatio: config.topZoneRatio,
-                    maxTouchAgeMillis: config.maxTouchAgeMillis,
-                    invertY: true,
-                    debug: config.debug
-                )
             case "--debug":
                 config = Config(
-                    leftZoneRatio: config.leftZoneRatio,
-                    topZoneRatio: config.topZoneRatio,
+                    zoneWidthRatio: config.zoneWidthRatio,
+                    zoneHeightRatio: config.zoneHeightRatio,
+                    corner: config.corner,
                     maxTouchAgeMillis: config.maxTouchAgeMillis,
-                    invertY: config.invertY,
                     debug: true
                 )
             case "--help":
@@ -85,10 +117,10 @@ private func printUsageAndExit() -> Never {
       trackpad-area-customizer [options]
 
     Options:
-      --left-zone <0.0-1.0>       Horizontal ratio from left edge (default: 0.33)
-      --top-zone <0.0-1.0>        Vertical ratio from top edge (default: 0.33)
+      --zone-width <0.0-1.0>      Horizontal size ratio of the corner zone (default: 0.33)
+      --zone-height <0.0-1.0>     Vertical size ratio of the corner zone (default: 0.33)
+      --corner <name>             top-left|top-right|bottom-left|bottom-right (default: top-left)
       --max-touch-age-ms <ms>     Max age of touch sample used for click mapping (default: 120)
-      --invert-y                  Use this if top/bottom is reversed on your device
       --debug                     Print debug log for each click event
       --help                      Show this message
     """
@@ -300,8 +332,9 @@ private final class ClickRemapper {
         self.source = source
 
         print(
-            "Running: left=\(config.leftZoneRatio), top=\(config.topZoneRatio), " +
-                "maxTouchAgeMs=\(config.maxTouchAgeMillis), invertY=\(config.invertY), debug=\(config.debug)"
+            "Running: zoneWidth=\(config.zoneWidthRatio), zoneHeight=\(config.zoneHeightRatio), " +
+                "corner=\(config.corner.rawValue), maxTouchAgeMs=\(config.maxTouchAgeMillis), " +
+                "debug=\(config.debug)"
         )
         return true
     }
@@ -314,22 +347,30 @@ private final class ClickRemapper {
             )
         }
 
-        let isLeft = snapshot.x <= config.leftZoneRatio
-        let isTop: Bool
-        if config.invertY {
-            isTop = snapshot.y <= config.topZoneRatio
+        let isHorizontalHit: Bool
+        if config.corner.isLeftSide {
+            isHorizontalHit = snapshot.x <= config.zoneWidthRatio
         } else {
-            isTop = snapshot.y >= (1.0 - config.topZoneRatio)
+            isHorizontalHit = snapshot.x >= (1.0 - config.zoneWidthRatio)
         }
-        let shouldApply = isLeft && isTop
+
+        let isVerticalHit: Bool
+        if config.corner.isTopSide {
+            isVerticalHit = snapshot.y >= (1.0 - config.zoneHeightRatio)
+        } else {
+            isVerticalHit = snapshot.y <= config.zoneHeightRatio
+        }
+
+        let shouldApply = isHorizontalHit && isVerticalHit
         return ClickDecision(
             shouldApplyCommand: shouldApply,
             debugMessage: String(
-                format: "leftMouseDown: x=%.3f y=%.3f isLeft=%@ isTop=%@ applyCmd=%@",
+                format: "leftMouseDown: corner=%@ x=%.3f y=%.3f horizontalHit=%@ verticalHit=%@ applyCmd=%@",
+                config.corner.rawValue,
                 snapshot.x,
                 snapshot.y,
-                isLeft ? "true" : "false",
-                isTop ? "true" : "false",
+                isHorizontalHit ? "true" : "false",
+                isVerticalHit ? "true" : "false",
                 shouldApply ? "true" : "false"
             )
         )

@@ -1,7 +1,7 @@
 # trackpad-area-customizer
 
 Mac のトラックパッド座標を使って、左クリックを `Cmd+クリック` に変換する常駐ツールです。  
-この実装では「トラックパッド左上ゾーン」で押したクリックのみを変換します。
+この実装では「トラックパッドの指定した隅ゾーン」で押したクリックのみを変換します。
 
 ## 仕組み
 
@@ -46,10 +46,10 @@ swift run trackpad-area-customizer --debug
 ### オプション
 
 ```text
---left-zone <0.0-1.0>       左端からの横幅比率 (default: 0.33)
---top-zone <0.0-1.0>        上端からの縦幅比率 (default: 0.33)
+--zone-width <0.0-1.0>      コーナーゾーンの横幅比率 (default: 0.33)
+--zone-height <0.0-1.0>     コーナーゾーンの縦幅比率 (default: 0.33)
+--corner <name>             top-left|top-right|bottom-left|bottom-right (default: top-left)
 --max-touch-age-ms <ms>     クリック判定で使うタッチ情報の最大経過時間 (default: 120)
---invert-y                  上下判定が逆の場合に有効化
 --debug                     クリックイベントごとのデバッグログを出力
 --help
 ```
@@ -57,7 +57,13 @@ swift run trackpad-area-customizer --debug
 例: 左上 20% x 25% だけを `Cmd+クリック` 化
 
 ```bash
-.build/release/trackpad-area-customizer --left-zone 0.2 --top-zone 0.25
+.build/release/trackpad-area-customizer --corner top-left --zone-width 0.2 --zone-height 0.25
+```
+
+例: 右下 20% x 25% だけを `Cmd+クリック` 化
+
+```bash
+.build/release/trackpad-area-customizer --corner bottom-right --zone-width 0.2 --zone-height 0.25
 ```
 
 デバッグログを有効化:
@@ -69,4 +75,4 @@ swift run trackpad-area-customizer --debug
 ## 注意
 
 - `MultitouchSupport` は Private Framework なので将来の macOS で動かなくなる可能性があります。
-- うまく反応しない場合は `--invert-y` と `--max-touch-age-ms` を調整してください。
+- うまく反応しない場合は `--max-touch-age-ms` を調整してください。
