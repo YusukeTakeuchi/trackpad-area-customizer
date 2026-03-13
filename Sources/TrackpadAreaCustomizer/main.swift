@@ -163,7 +163,7 @@ private final class ClickRemapper {
 
     private enum PendingUpBehavior {
         case none
-        case commandClick
+        case modifiedClick(ModifiedClickAction)
         case suppress
     }
 
@@ -282,6 +282,15 @@ private final class ClickRemapper {
         print("[debug] \(message)")
     }
 
+    private func applyClickFlags(_ flags: CGEventFlags, to event: CGEvent) {
+        guard !flags.isEmpty else {
+            return
+        }
+        var eventFlags = event.flags
+        eventFlags.formUnion(flags)
+        event.flags = eventFlags
+    }
+
     private func handleEvent(type: CGEventType, event: CGEvent) -> Unmanaged<CGEvent>? {
         if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput {
             if let eventTap {
@@ -299,11 +308,9 @@ private final class ClickRemapper {
             switch decision.action {
             case .none:
                 pendingUpBehavior = .none
-            case .commandClick:
-                pendingUpBehavior = .commandClick
-                var flags = event.flags
-                flags.insert(.maskCommand)
-                event.flags = flags
+            case .modifiedClick(let clickAction):
+                pendingUpBehavior = .modifiedClick(clickAction)
+                applyClickFlags(clickAction.flags, to: event)
             case .keyboardShortcut(let shortcut):
                 sendShortcut(shortcut)
                 pendingUpBehavior = .suppress
@@ -314,11 +321,9 @@ private final class ClickRemapper {
             switch pendingUpBehavior {
             case .none:
                 debugLog("leftMouseUp: passthrough")
-            case .commandClick:
-                var flags = event.flags
-                flags.insert(.maskCommand)
-                event.flags = flags
-                debugLog("leftMouseUp: applyCmd=true (from leftMouseDown)")
+            case .modifiedClick(let clickAction):
+                applyClickFlags(clickAction.flags, to: event)
+                debugLog("leftMouseUp: applyClickAction=\(clickAction.displayString) (from leftMouseDown)")
                 pendingUpBehavior = .none
             case .suppress:
                 pendingUpBehavior = .none

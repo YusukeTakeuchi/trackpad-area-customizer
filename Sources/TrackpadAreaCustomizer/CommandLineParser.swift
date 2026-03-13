@@ -7,14 +7,19 @@ struct KeyboardShortcut {
     let displayString: String
 }
 
+struct ModifiedClickAction {
+    let flags: CGEventFlags
+    let displayString: String
+}
+
 enum TriggerAction {
-    case commandClick
+    case modifiedClick(ModifiedClickAction)
     case keyboardShortcut(KeyboardShortcut)
 
     var displayString: String {
         switch self {
-        case .commandClick:
-            return "cmd-click"
+        case .modifiedClick(let clickAction):
+            return clickAction.displayString
         case .keyboardShortcut(let shortcut):
             return "shortcut(\(shortcut.displayString))"
         }
@@ -199,10 +204,65 @@ private let keyboardKeyCodeMap: [String: CGKeyCode] = [
 
 private func parseActionSpec(_ rawValue: String) throws -> TriggerAction {
     let normalized = rawValue.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-    if normalized == "cmd+click" || normalized == "command+click" || normalized == "cmd-click" || normalized == "command-click" {
-        return .commandClick
+    if normalized == "cmd-click" || normalized == "command-click" {
+        return .modifiedClick(
+            ModifiedClickAction(flags: .maskCommand, displayString: "cmd+click")
+        )
     }
+
+    let tokens = normalized
+        .split(separator: "+")
+        .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+        .filter { !$0.isEmpty }
+
+    if tokens.contains("click") {
+        return .modifiedClick(try parseModifiedClickAction(tokens: tokens, rawValue: rawValue))
+    }
+
     return .keyboardShortcut(try parseKeyboardShortcut(rawValue))
+}
+
+private func parseModifiedClickAction(tokens: [String], rawValue: String) throws -> ModifiedClickAction {
+    guard tokens.last == "click" else {
+        throw ParseError(message: "Invalid click action: \(rawValue) (click must be the last token)")
+    }
+
+    var flags = CGEventFlags()
+    var hasCommand = false
+    var hasControl = false
+    var hasOption = false
+    var hasShift = false
+
+    for token in tokens.dropLast() {
+        switch token {
+        case "cmd", "command":
+            flags.insert(.maskCommand)
+            hasCommand = true
+        case "ctrl", "control":
+            flags.insert(.maskControl)
+            hasControl = true
+        case "opt", "option", "alt":
+            flags.insert(.maskAlternate)
+            hasOption = true
+        case "shift":
+            flags.insert(.maskShift)
+            hasShift = true
+        default:
+            throw ParseError(message: "Invalid click action: \(rawValue) (unknown modifier: \(token))")
+        }
+    }
+
+    var components: [String] = []
+    if hasCommand { components.append("cmd") }
+    if hasControl { components.append("ctrl") }
+    if hasOption { components.append("opt") }
+    if hasShift { components.append("shift") }
+    components.append("click")
+
+    return ModifiedClickAction(
+        flags: flags,
+        displayString: components.joined(separator: "+")
+    )
 }
 
 private func parseKeyboardShortcut(_ rawValue: String) throws -> KeyboardShortcut {
@@ -523,7 +583,7 @@ private func printUsageAndExit(exitCode: Int32 = 0, toStderr: Bool = false) -> N
     config format:
       [
         {"area": ["0.3 < x < 0.8"], "shortcut": "f12"},
-        {"area": ["0.8 < x", "y < 0.2"], "shortcut": "cmd+click"}
+        {"area": ["0.8 < x", "y < 0.2"], "shortcut": "shift+click"}
       ]
     """
     if toStderr {
