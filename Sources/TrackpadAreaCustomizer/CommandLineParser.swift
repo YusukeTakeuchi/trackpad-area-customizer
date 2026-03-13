@@ -81,7 +81,11 @@ struct Config {
             "]": 30, "o": 31, "u": 32, "[": 33, "i": 34, "p": 35, "l": 37,
             "j": 38, "'": 39, "k": 40, ";": 41, "\\": 42, ",": 43, "/": 44,
             "n": 45, "m": 46, ".": 47, "`": 50, "return": 36, "enter": 36,
-            "space": 49, "tab": 48, "escape": 53, "esc": 53
+            "space": 49, "tab": 48, "escape": 53, "esc": 53,
+            "f1": 122, "f2": 120, "f3": 99, "f4": 118, "f5": 96, "f6": 97,
+            "f7": 98, "f8": 100, "f9": 101, "f10": 109, "f11": 103, "f12": 111,
+            "f13": 105, "f14": 107, "f15": 113, "f16": 106, "f17": 64, "f18": 79,
+            "f19": 80, "f20": 90
         ]
 
         func parseShortcut(_ rawValue: String) -> KeyboardShortcut {
@@ -225,7 +229,7 @@ private func printUsageAndExit(exitCode: Int32 = 0, toStderr: Bool = false) -> N
       --zone-height <0.0-1.0>     Vertical size ratio of the corner zone (default: 0.33)
       --corner <name>             top-left|top-right|bottom-left|bottom-right (default: top-left)
       --max-touch-age-ms <ms>     Max age of touch sample used for click mapping (default: 120)
-      --shortcut <combo>          Send shortcut instead of cmd-click (e.g. cmd+c, cmd+shift+v)
+      --shortcut <combo>          Send shortcut instead of cmd-click (e.g. cmd+c, cmd+shift+v, f18)
       --debug                     Print debug log for each click event
       --help                      Show this message
     """

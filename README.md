@@ -52,7 +52,7 @@ swift run trackpad-area-customizer --debug
 --zone-height <0.0-1.0>     コーナーゾーンの縦幅比率 (default: 0.33)
 --corner <name>             top-left|top-right|bottom-left|bottom-right (default: top-left)
 --max-touch-age-ms <ms>     クリック判定で使うタッチ情報の最大経過時間 (default: 120)
---shortcut <combo>          Cmd+クリックの代わりにショートカットを送出 (例: cmd+c)
+--shortcut <combo>          Cmd+クリックの代わりにショートカットを送出 (例: cmd+c, f18)
 --debug                     クリックイベントごとのデバッグログを出力
 --help
 ```
@@ -73,6 +73,12 @@ swift run trackpad-area-customizer --debug
 
 ```bash
 .build/release/trackpad-area-customizer --corner bottom-right --zone-width 0.2 --zone-height 0.25 --shortcut cmd+c
+```
+
+例: 右下 20% x 25% を押したら `F18` を送出
+
+```bash
+.build/release/trackpad-area-customizer --corner bottom-right --zone-width 0.2 --zone-height 0.25 --shortcut f18
 ```
 
 デバッグログを有効化:
