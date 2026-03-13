@@ -159,11 +159,16 @@ private final class ClickRemapper {
 
     private var eventTap: CFMachPort?
     private var source: CFRunLoopSource?
-    private var pendingCommandForCurrentClick = false
-    private var pendingSuppressedClick = false
+    private var pendingUpBehavior = PendingUpBehavior.none
+
+    private enum PendingUpBehavior {
+        case none
+        case commandClick
+        case suppress
+    }
 
     private struct ClickDecision {
-        let isInTriggerZone: Bool
+        let action: TriggerAction?
         let debugMessage: String
     }
 
@@ -206,46 +211,43 @@ private final class ClickRemapper {
         self.source = source
 
         print(
-            "Running: zoneWidth=\(config.zoneWidthRatio), zoneHeight=\(config.zoneHeightRatio), " +
-                "corner=\(config.corner.rawValue), maxTouchAgeMs=\(config.maxTouchAgeMillis), " +
-                "action=\(config.action.displayString), debug=\(config.debug)"
+            "Running: mode=config, rules=\(config.areaRules.count), " +
+                "maxTouchAgeMs=\(config.maxTouchAgeMillis), debug=\(config.debug)"
         )
+
         return true
     }
 
     private func evaluateClick() -> ClickDecision {
         guard let snapshot = touchState.latest(maxAgeMillis: config.maxTouchAgeMillis) else {
             return ClickDecision(
-                isInTriggerZone: false,
+                action: nil,
                 debugMessage: "leftMouseDown: no recent touch snapshot"
             )
         }
 
-        let isHorizontalHit: Bool
-        if config.corner.isLeftSide {
-            isHorizontalHit = snapshot.x <= config.zoneWidthRatio
-        } else {
-            isHorizontalHit = snapshot.x >= (1.0 - config.zoneWidthRatio)
+        for (index, rule) in config.areaRules.enumerated() {
+            if rule.matches(x: snapshot.x, y: snapshot.y) {
+                return ClickDecision(
+                    action: rule.action,
+                    debugMessage: String(
+                        format: "leftMouseDown(rules): x=%.3f y=%.3f matchedRule=%d action=%@ expr=%@",
+                        snapshot.x,
+                        snapshot.y,
+                        index + 1,
+                        rule.action.displayString,
+                        rule.description
+                    )
+                )
+            }
         }
 
-        let isVerticalHit: Bool
-        if config.corner.isTopSide {
-            isVerticalHit = snapshot.y >= (1.0 - config.zoneHeightRatio)
-        } else {
-            isVerticalHit = snapshot.y <= config.zoneHeightRatio
-        }
-
-        let isInTriggerZone = isHorizontalHit && isVerticalHit
         return ClickDecision(
-            isInTriggerZone: isInTriggerZone,
+            action: nil,
             debugMessage: String(
-                format: "leftMouseDown: corner=%@ x=%.3f y=%.3f horizontalHit=%@ verticalHit=%@ trigger=%@",
-                config.corner.rawValue,
+                format: "leftMouseDown(rules): x=%.3f y=%.3f matchedRule=none",
                 snapshot.x,
-                snapshot.y,
-                isHorizontalHit ? "true" : "false",
-                isVerticalHit ? "true" : "false",
-                isInTriggerZone ? "true" : "false"
+                snapshot.y
             )
         )
     }
@@ -285,8 +287,7 @@ private final class ClickRemapper {
             if let eventTap {
                 CGEvent.tapEnable(tap: eventTap, enable: true)
             }
-            pendingCommandForCurrentClick = false
-            pendingSuppressedClick = false
+            pendingUpBehavior = .none
             debugLog("eventTap was disabled; re-enabled")
             return Unmanaged.passUnretained(event)
         }
@@ -295,43 +296,34 @@ private final class ClickRemapper {
             let decision = evaluateClick()
             debugLog(decision.debugMessage)
 
-            switch config.action {
+            switch decision.action {
+            case .none:
+                pendingUpBehavior = .none
             case .commandClick:
-                pendingSuppressedClick = false
-                pendingCommandForCurrentClick = decision.isInTriggerZone
-                if decision.isInTriggerZone {
-                    var flags = event.flags
-                    flags.insert(.maskCommand)
-                    event.flags = flags
-                }
+                pendingUpBehavior = .commandClick
+                var flags = event.flags
+                flags.insert(.maskCommand)
+                event.flags = flags
             case .keyboardShortcut(let shortcut):
-                pendingCommandForCurrentClick = false
-                if decision.isInTriggerZone {
-                    sendShortcut(shortcut)
-                    pendingSuppressedClick = true
-                    debugLog("leftMouseDown: sent shortcut=\(shortcut.displayString)")
-                    return nil
-                }
-                pendingSuppressedClick = false
+                sendShortcut(shortcut)
+                pendingUpBehavior = .suppress
+                debugLog("leftMouseDown: sent shortcut=\(shortcut.displayString)")
+                return nil
             }
         } else if type == .leftMouseUp {
-            switch config.action {
+            switch pendingUpBehavior {
+            case .none:
+                debugLog("leftMouseUp: passthrough")
             case .commandClick:
-                if pendingCommandForCurrentClick {
-                    var flags = event.flags
-                    flags.insert(.maskCommand)
-                    event.flags = flags
-                    debugLog("leftMouseUp: applyCmd=true (from leftMouseDown)")
-                } else {
-                    debugLog("leftMouseUp: applyCmd=false")
-                }
-                pendingCommandForCurrentClick = false
-            case .keyboardShortcut:
-                if pendingSuppressedClick {
-                    pendingSuppressedClick = false
-                    debugLog("leftMouseUp: suppressed (shortcut mode)")
-                    return nil
-                }
+                var flags = event.flags
+                flags.insert(.maskCommand)
+                event.flags = flags
+                debugLog("leftMouseUp: applyCmd=true (from leftMouseDown)")
+                pendingUpBehavior = .none
+            case .suppress:
+                pendingUpBehavior = .none
+                debugLog("leftMouseUp: suppressed (shortcut mode)")
+                return nil
             }
         }
 
