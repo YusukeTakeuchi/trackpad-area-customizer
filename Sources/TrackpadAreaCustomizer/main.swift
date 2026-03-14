@@ -8,6 +8,11 @@ private final class TouchState {
         let time: CFAbsoluteTime
     }
 
+    struct LookupResult {
+        let recent: Snapshot?
+        let latest: Snapshot?
+    }
+
     private let lock = NSLock()
     private var latestSnapshot: Snapshot?
 
@@ -18,15 +23,16 @@ private final class TouchState {
         lock.unlock()
     }
 
-    func latest(maxAgeMillis: Double) -> Snapshot? {
+    func lookup(maxAgeMillis: Double) -> LookupResult {
         lock.lock()
         defer { lock.unlock() }
 
         guard let snapshot = latestSnapshot else {
-            return nil
+            return LookupResult(recent: nil, latest: nil)
         }
         let ageMillis = (CFAbsoluteTimeGetCurrent() - snapshot.time) * 1_000
-        return ageMillis <= maxAgeMillis ? snapshot : nil
+        let recentSnapshot = ageMillis <= maxAgeMillis ? snapshot : nil
+        return LookupResult(recent: recentSnapshot, latest: snapshot)
     }
 }
 
@@ -147,6 +153,11 @@ private final class MultitouchTracker {
         globalTouchState = nil
     }
 
+    func restart() -> Bool {
+        stop()
+        return start()
+    }
+
     deinit {
         stop()
     }
@@ -160,6 +171,11 @@ private final class ClickRemapper {
     private var eventTap: CFMachPort?
     private var source: CFRunLoopSource?
     private var pendingUpBehavior = PendingUpBehavior.none
+    private static let snapshotTimestampFormatter: ISO8601DateFormatter = {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return formatter
+    }()
 
     private enum PendingUpBehavior {
         case none
@@ -170,6 +186,7 @@ private final class ClickRemapper {
     private struct ClickDecision {
         let action: TriggerAction?
         let debugMessage: String
+        let shouldRestartTracker: Bool
     }
 
     init(config: Config) {
@@ -188,7 +205,6 @@ private final class ClickRemapper {
         guard tracker.start() else {
             return false
         }
-
         let leftDownMask = CGEventMask(1 << CGEventType.leftMouseDown.rawValue)
         let leftUpMask = CGEventMask(1 << CGEventType.leftMouseUp.rawValue)
         guard let tap = CGEvent.tapCreate(
@@ -219,10 +235,20 @@ private final class ClickRemapper {
     }
 
     private func evaluateClick() -> ClickDecision {
-        guard let snapshot = touchState.latest(maxAgeMillis: config.maxTouchAgeMillis) else {
+        let lookup = touchState.lookup(maxAgeMillis: config.maxTouchAgeMillis)
+        guard let snapshot = lookup.recent else {
+            let timestamp: String
+            if let latestSnapshot = lookup.latest {
+                timestamp = Self.snapshotTimestampFormatter.string(
+                    from: Date(timeIntervalSinceReferenceDate: latestSnapshot.time)
+                )
+            } else {
+                timestamp = "none"
+            }
             return ClickDecision(
                 action: nil,
-                debugMessage: "leftMouseDown: no recent touch snapshot"
+                debugMessage: "leftMouseDown: no recent touch snapshot (lastSnapshotAt=\(timestamp))",
+                shouldRestartTracker: true
             )
         }
 
@@ -237,7 +263,8 @@ private final class ClickRemapper {
                         index + 1,
                         rule.action.displayString,
                         rule.description
-                    )
+                    ),
+                    shouldRestartTracker: false
                 )
             }
         }
@@ -248,7 +275,8 @@ private final class ClickRemapper {
                 format: "leftMouseDown(rules): x=%.3f y=%.3f matchedRule=none",
                 snapshot.x,
                 snapshot.y
-            )
+            ),
+            shouldRestartTracker: false
         )
     }
 
@@ -304,6 +332,15 @@ private final class ClickRemapper {
         if type == .leftMouseDown {
             let decision = evaluateClick()
             debugLog(decision.debugMessage)
+            if decision.shouldRestartTracker {
+                pendingUpBehavior = .none
+                if tracker.restart() {
+                    debugLog("leftMouseDown: restarted multitouch tracker after missing snapshot")
+                } else {
+                    fputs("Failed to restart multitouch tracker after missing snapshot.\n", stderr)
+                }
+                return Unmanaged.passUnretained(event)
+            }
 
             switch decision.action {
             case .none:
