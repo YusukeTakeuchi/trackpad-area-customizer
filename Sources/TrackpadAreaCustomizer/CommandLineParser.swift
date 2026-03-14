@@ -62,27 +62,62 @@ struct AreaCondition {
 
         return true
     }
+
+    func expanded(by margin: Double) -> AreaCondition {
+        guard margin > 0 else {
+            return self
+        }
+
+        func clamp(_ value: Double) -> Double {
+            min(max(value, 0), 1)
+        }
+
+        let expandedLower = lowerBound.map {
+            Bound(value: clamp($0.value - margin), inclusive: $0.inclusive)
+        }
+        let expandedUpper = upperBound.map {
+            Bound(value: clamp($0.value + margin), inclusive: $0.inclusive)
+        }
+
+        return AreaCondition(axis: axis, lowerBound: expandedLower, upperBound: expandedUpper)
+    }
 }
 
 struct AreaRule {
     let conditions: [AreaCondition]
     let action: TriggerAction
+    let missClickMargin: Double
     let description: String
 
     func matches(x: Double, y: Double) -> Bool {
         conditions.allSatisfy { $0.matches(x: x, y: y) }
+    }
+
+    func matchesOutsideButWithinMargin(x: Double, y: Double) -> Bool {
+        guard missClickMargin > 0 else {
+            return false
+        }
+        guard !matches(x: x, y: y) else {
+            return false
+        }
+        return conditions
+            .map { $0.expanded(by: missClickMargin) }
+            .allSatisfy { $0.matches(x: x, y: y) }
     }
 }
 
 struct Config {
     let areaRules: [AreaRule]
     let maxTouchAgeMillis: Double
+    let missClickHistoryWindowMillis: Double
     let debug: Bool
 
     static let defaultMaxTouchAgeMillis: Double = 120
+    static let defaultMissClickHistoryWindowMillis: Double = 1_000
 
     static func parse() -> Config {
         var maxTouchAgeMillis = Self.defaultMaxTouchAgeMillis
+        var missClickHistoryWindowMillis = Self.defaultMissClickHistoryWindowMillis
         var debug = false
         var configPath: String?
 
@@ -115,6 +150,12 @@ struct Config {
                     failParse("Invalid value for --max-touch-age-ms: \(value) (expected value > 0)")
                 }
                 maxTouchAgeMillis = millis
+            case "--miss-click-history-seconds":
+                let value = nextValue(for: argument)
+                guard let seconds = Double(value), seconds > 0 else {
+                    failParse("Invalid value for --miss-click-history-seconds: \(value) (expected value > 0)")
+                }
+                missClickHistoryWindowMillis = seconds * 1_000
             case "--debug":
                 debug = true
             case "--help":
@@ -141,6 +182,7 @@ struct Config {
         return Config(
             areaRules: areaRules,
             maxTouchAgeMillis: maxTouchAgeMillis,
+            missClickHistoryWindowMillis: missClickHistoryWindowMillis,
             debug: debug
         )
     }
@@ -153,6 +195,7 @@ private struct RulesWrapper: Decodable {
 private struct RawRule: Decodable {
     let area: [String]
     let shortcut: String
+    let missClickMargin: Double?
 }
 
 private struct PartialCondition {
@@ -373,10 +416,18 @@ private func parseRulesJSON(at path: String) throws -> [AreaRule] {
             throw ParseError(message: "Rule #\(index + 1): \(error.message)")
         }
 
+        let missClickMargin = rawRule.missClickMargin ?? 0
+        guard missClickMargin >= 0, missClickMargin <= 1 else {
+            throw ParseError(
+                message: "Rule #\(index + 1): missClickMargin must be in range 0...1"
+            )
+        }
+
         parsedRules.append(
             AreaRule(
                 conditions: conditions,
                 action: action,
+                missClickMargin: missClickMargin,
                 description: rawRule.area.joined(separator: " && ")
             )
         )
@@ -577,13 +628,15 @@ private func printUsageAndExit(exitCode: Int32 = 0, toStderr: Bool = false) -> N
     Options:
       --config <path>             JSON rules file path (required)
       --max-touch-age-ms <ms>     Max age of touch sample used for click mapping (default: 120)
+      --miss-click-history-seconds <s>
+                                 History window (seconds) used for miss-click margin detection (default: 1.0)
       --debug                     Print debug log for each click event
       --help                      Show this message
 
     config format:
       [
         {"area": ["0.3 < x < 0.8"], "shortcut": "f12"},
-        {"area": ["0.8 < x", "y < 0.2"], "shortcut": "shift+click"}
+        {"area": ["0.8 < x", "y < 0.2"], "shortcut": "shift+click", "missClickMargin": 0.04}
       ]
     """
     if toStderr {

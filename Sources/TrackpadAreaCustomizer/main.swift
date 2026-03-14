@@ -11,28 +11,38 @@ private final class TouchState {
     struct LookupResult {
         let recent: Snapshot?
         let latest: Snapshot?
+        let recentHistory: [Snapshot]
     }
 
     private let lock = NSLock()
     private var latestSnapshot: Snapshot?
+    private var snapshots: [Snapshot] = []
+    private static let maxSnapshotHistory = 128
 
     func update(x: Double, y: Double) {
         let snapshot = Snapshot(x: x, y: y, time: CFAbsoluteTimeGetCurrent())
         lock.lock()
         latestSnapshot = snapshot
+        snapshots.append(snapshot)
+        let overflow = snapshots.count - Self.maxSnapshotHistory
+        if overflow > 0 {
+            snapshots.removeFirst(overflow)
+        }
         lock.unlock()
     }
 
-    func lookup(maxAgeMillis: Double) -> LookupResult {
+    func lookup(maxAgeMillis: Double, historyAgeMillis: Double) -> LookupResult {
         lock.lock()
         defer { lock.unlock() }
 
         guard let snapshot = latestSnapshot else {
-            return LookupResult(recent: nil, latest: nil)
+            return LookupResult(recent: nil, latest: nil, recentHistory: [])
         }
-        let ageMillis = (CFAbsoluteTimeGetCurrent() - snapshot.time) * 1_000
+        let now = CFAbsoluteTimeGetCurrent()
+        let ageMillis = (now - snapshot.time) * 1_000
         let recentSnapshot = ageMillis <= maxAgeMillis ? snapshot : nil
-        return LookupResult(recent: recentSnapshot, latest: snapshot)
+        let recentHistory = snapshots.filter { (now - $0.time) * 1_000 <= historyAgeMillis }
+        return LookupResult(recent: recentSnapshot, latest: snapshot, recentHistory: recentHistory)
     }
 }
 
@@ -228,14 +238,21 @@ private final class ClickRemapper {
 
         print(
             "Running: mode=config, rules=\(config.areaRules.count), " +
-                "maxTouchAgeMs=\(config.maxTouchAgeMillis), debug=\(config.debug)"
+                "marginRules=\(config.areaRules.filter { $0.missClickMargin > 0 }.count), " +
+                "maxTouchAgeMs=\(config.maxTouchAgeMillis), " +
+                String(format: "missClickHistoryWindowSec=%.3f, ", config.missClickHistoryWindowMillis / 1_000) +
+                "debug=\(config.debug)"
         )
 
         return true
     }
 
     private func evaluateClick() -> ClickDecision {
-        let lookup = touchState.lookup(maxAgeMillis: config.maxTouchAgeMillis)
+        let lookup = touchState.lookup(
+            maxAgeMillis: config.maxTouchAgeMillis,
+            historyAgeMillis: config.missClickHistoryWindowMillis
+        )
+        debugLog("leftMouseDown: recentHistoryCount=\(lookup.recentHistory.count)")
         guard let snapshot = lookup.recent else {
             let timestamp: String
             if let latestSnapshot = lookup.latest {
@@ -254,15 +271,34 @@ private final class ClickRemapper {
 
         for (index, rule) in config.areaRules.enumerated() {
             if rule.matches(x: snapshot.x, y: snapshot.y) {
+                if rule.missClickMargin > 0 {
+                    let recentlyTouchedMargin = lookup.recentHistory.contains {
+                        rule.matchesOutsideButWithinMargin(x: $0.x, y: $0.y)
+                    }
+                    if recentlyTouchedMargin {
+                        return ClickDecision(
+                            action: nil,
+                            debugMessage: String(
+                                format: "leftMouseDown(rules): x=%.3f y=%.3f matchedRule=%d margin=%.3f recentOuterMarginTouch=true passthrough",
+                                snapshot.x,
+                                snapshot.y,
+                                index + 1,
+                                rule.missClickMargin
+                            ),
+                            shouldRestartTracker: false
+                        )
+                    }
+                }
                 return ClickDecision(
                     action: rule.action,
                     debugMessage: String(
-                        format: "leftMouseDown(rules): x=%.3f y=%.3f matchedRule=%d action=%@ expr=%@",
+                        format: "leftMouseDown(rules): x=%.3f y=%.3f matchedRule=%d action=%@ expr=%@ margin=%.3f",
                         snapshot.x,
                         snapshot.y,
                         index + 1,
                         rule.action.displayString,
-                        rule.description
+                        rule.description,
+                        rule.missClickMargin
                     ),
                     shouldRestartTracker: false
                 )

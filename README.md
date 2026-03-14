@@ -48,6 +48,7 @@ swift run trackpad-area-customizer --config ./config.json --debug
 ```text
 --config <path>         JSON rules file path (required)
 --max-touch-age-ms <ms>     クリック判定で使うタッチ情報の最大経過時間 (default: 120)
+--miss-click-history-seconds <s> missClickMargin 判定で使う履歴時間(秒) (default: 1.0)
 --debug                     クリックイベントごとのデバッグログを出力
 --help
 ```
@@ -58,7 +59,8 @@ swift run trackpad-area-customizer --config ./config.json --debug
 [
   {
     "area": ["0.3 < x < 0.8"],
-    "shortcut": "f12"
+    "shortcut": "f12",
+    "missClickMargin": 0.03
   },
   {
     "area": ["0.8 < x", "y < 0.2"],
@@ -70,8 +72,9 @@ swift run trackpad-area-customizer --config ./config.json --debug
 - ルールは上から順に評価し、最初に一致したルールを適用
 - `area` の式は `x` / `y` に対して `<`, `<=`, `>`, `>=` を使用
 - `shortcut` は `cmd+click`, `shift+click`, `ctrl+click`, `opt+click`, `cmd+c`, `cmd+shift+v`, `f1`-`f20` などを指定可能
+- `missClickMargin` は省略可 (default: `0`)。`0` より大きい場合、対象エリア外側のマージン帯に `--miss-click-history-seconds` 以内で触れていたときはミスクリックとしてパススルーします。
 
 ## 注意
 
 - `MultitouchSupport` は Private Framework なので将来の macOS で動かなくなる可能性があります。
-- うまく反応しない場合は `--max-touch-age-ms` を調整してください。
+- うまく反応しない場合は `--max-touch-age-ms`（クリック判定）と `--miss-click-history-seconds`（ミスクリック判定）を調整してください。
