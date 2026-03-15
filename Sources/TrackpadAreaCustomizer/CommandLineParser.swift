@@ -114,6 +114,7 @@ struct Config {
 
     static let defaultMaxTouchAgeMillis: Double = 120
     static let defaultMissClickHistoryWindowMillis: Double = 1_000
+    static let defaultMissClickMargin: Double = 0.03
 
     static func parse() -> Config {
         var maxTouchAgeMillis = Self.defaultMaxTouchAgeMillis
@@ -416,7 +417,7 @@ private func parseRulesJSON(at path: String) throws -> [AreaRule] {
             throw ParseError(message: "Rule #\(index + 1): \(error.message)")
         }
 
-        let missClickMargin = rawRule.missClickMargin ?? 0
+        let missClickMargin = rawRule.missClickMargin ?? Config.defaultMissClickMargin
         guard missClickMargin >= 0, missClickMargin <= 1 else {
             throw ParseError(
                 message: "Rule #\(index + 1): missClickMargin must be in range 0...1"
