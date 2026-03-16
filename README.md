@@ -72,7 +72,7 @@ swift run trackpad-area-customizer --config ./config.json --debug
 - ルールは上から順に評価し、最初に一致したルールを適用
 - `area` の式は `x` / `y` に対して `<`, `<=`, `>`, `>=` を使用
 - `shortcut` は `cmd+click`, `shift+click`, `ctrl+click`, `opt+click`, `cmd+c`, `cmd+shift+v`, `f1`-`f20` などを指定可能
-- `missClickMargin` は省略可 (default: `0.03`)。`0` より大きい場合、対象エリア外側のマージン帯に `--miss-click-history-seconds` 以内で触れていたときはミスクリックとしてパススルーします。
+- `missClickMargin` は省略可 (default: `0.03`)。`0` より大きい場合、対象エリア外側のマージン帯に `--miss-click-history-seconds` 以内で触れていたときはミスクリックとしてパススルーします。いったんミスクリック判定になると、同じ領域内のクリックは「領域外がタップされる」か「`recentHistory` 件数が `maxSnapshotHistory / 4` 未満になる」までパススルーを継続します。
 
 ## 注意
 

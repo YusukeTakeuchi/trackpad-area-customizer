@@ -18,6 +18,7 @@ private final class TouchState {
     private var latestSnapshot: Snapshot?
     private var snapshots: [Snapshot] = []
     private static let maxSnapshotHistory = 128
+    static let missClickPassthroughMinimumHistoryCount = maxSnapshotHistory / 4
 
     func update(x: Double, y: Double) {
         let snapshot = Snapshot(x: x, y: y, time: CFAbsoluteTimeGetCurrent())
@@ -181,6 +182,7 @@ private final class ClickRemapper {
     private var eventTap: CFMachPort?
     private var source: CFRunLoopSource?
     private var pendingUpBehavior = PendingUpBehavior.none
+    private var activeMissClickPassthroughRuleIndex: Int?
     private static let snapshotTimestampFormatter: ISO8601DateFormatter = {
         let formatter = ISO8601DateFormatter()
         formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
@@ -254,6 +256,7 @@ private final class ClickRemapper {
         )
         debugLog("leftMouseDown: recentHistoryCount=\(lookup.recentHistory.count)")
         guard let snapshot = lookup.recent else {
+            activeMissClickPassthroughRuleIndex = nil
             let timestamp: String
             if let latestSnapshot = lookup.latest {
                 timestamp = Self.snapshotTimestampFormatter.string(
@@ -269,40 +272,75 @@ private final class ClickRemapper {
             )
         }
 
-        for (index, rule) in config.areaRules.enumerated() {
-            if rule.matches(x: snapshot.x, y: snapshot.y) {
-                if rule.missClickMargin > 0 {
-                    let recentlyTouchedMargin = lookup.recentHistory.contains {
-                        rule.matchesOutsideButWithinMargin(x: $0.x, y: $0.y)
-                    }
-                    if recentlyTouchedMargin {
-                        return ClickDecision(
-                            action: nil,
-                            debugMessage: String(
-                                format: "leftMouseDown(rules): x=%.3f y=%.3f matchedRule=%d margin=%.3f recentOuterMarginTouch=true passthrough",
-                                snapshot.x,
-                                snapshot.y,
-                                index + 1,
-                                rule.missClickMargin
-                            ),
-                            shouldRestartTracker: false
-                        )
-                    }
-                }
+        let matchedRule = config.areaRules.enumerated().first {
+            $0.element.matches(x: snapshot.x, y: snapshot.y)
+        }
+
+        if let activeRuleIndex = activeMissClickPassthroughRuleIndex {
+            if lookup.recentHistory.count < TouchState.missClickPassthroughMinimumHistoryCount {
+                debugLog(
+                    String(
+                        format: "leftMouseDown(missClick): cleared passthrough state because recentHistoryCount=%d is below threshold=%d",
+                        lookup.recentHistory.count,
+                        TouchState.missClickPassthroughMinimumHistoryCount
+                    )
+                )
+                activeMissClickPassthroughRuleIndex = nil
+            } else if matchedRule?.offset != activeRuleIndex {
+                debugLog(
+                    String(
+                        format: "leftMouseDown(missClick): cleared passthrough state by outside tap (rule=%d)",
+                        activeRuleIndex + 1
+                    )
+                )
+                activeMissClickPassthroughRuleIndex = nil
+            } else {
                 return ClickDecision(
-                    action: rule.action,
+                    action: nil,
                     debugMessage: String(
-                        format: "leftMouseDown(rules): x=%.3f y=%.3f matchedRule=%d action=%@ expr=%@ margin=%.3f",
+                        format: "leftMouseDown(missClick): x=%.3f y=%.3f activeRule=%d continuePassthrough=true",
                         snapshot.x,
                         snapshot.y,
-                        index + 1,
-                        rule.action.displayString,
-                        rule.description,
-                        rule.missClickMargin
+                        activeRuleIndex + 1
                     ),
                     shouldRestartTracker: false
                 )
             }
+        }
+
+        if let (index, rule) = matchedRule {
+            if rule.missClickMargin > 0 {
+                let recentlyTouchedMargin = lookup.recentHistory.contains {
+                    rule.matchesOutsideButWithinMargin(x: $0.x, y: $0.y)
+                }
+                if recentlyTouchedMargin {
+                    activeMissClickPassthroughRuleIndex = index
+                    return ClickDecision(
+                        action: nil,
+                        debugMessage: String(
+                            format: "leftMouseDown(rules): x=%.3f y=%.3f matchedRule=%d margin=%.3f recentOuterMarginTouch=true passthrough=latched",
+                            snapshot.x,
+                            snapshot.y,
+                            index + 1,
+                            rule.missClickMargin
+                        ),
+                        shouldRestartTracker: false
+                    )
+                }
+            }
+            return ClickDecision(
+                action: rule.action,
+                debugMessage: String(
+                    format: "leftMouseDown(rules): x=%.3f y=%.3f matchedRule=%d action=%@ expr=%@ margin=%.3f",
+                    snapshot.x,
+                    snapshot.y,
+                    index + 1,
+                    rule.action.displayString,
+                    rule.description,
+                    rule.missClickMargin
+                ),
+                shouldRestartTracker: false
+            )
         }
 
         return ClickDecision(
@@ -361,6 +399,7 @@ private final class ClickRemapper {
                 CGEvent.tapEnable(tap: eventTap, enable: true)
             }
             pendingUpBehavior = .none
+            activeMissClickPassthroughRuleIndex = nil
             debugLog("eventTap was disabled; re-enabled")
             return Unmanaged.passUnretained(event)
         }
@@ -370,6 +409,7 @@ private final class ClickRemapper {
             debugLog(decision.debugMessage)
             if decision.shouldRestartTracker {
                 pendingUpBehavior = .none
+                activeMissClickPassthroughRuleIndex = nil
                 if tracker.restart() {
                     debugLog("leftMouseDown: restarted multitouch tracker after missing snapshot")
                 } else {
