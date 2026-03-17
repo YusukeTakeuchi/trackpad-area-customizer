@@ -44,4 +44,17 @@ final class TouchState {
         let recentHistory = snapshots.filter { (now - $0.time) * 1_000 <= historyAgeMillis }
         return LookupResult(recent: recentSnapshot, latest: snapshot, recentHistory: recentHistory)
     }
+
+    func recentSnapshot(maxAgeMillis: Double) -> Snapshot? {
+        lock.lock()
+        defer { lock.unlock() }
+
+        guard let snapshot = latestSnapshot else {
+            return nil
+        }
+
+        let now = CFAbsoluteTimeGetCurrent()
+        let ageMillis = (now - snapshot.time) * 1_000
+        return ageMillis <= maxAgeMillis ? snapshot : nil
+    }
 }

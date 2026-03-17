@@ -49,6 +49,7 @@ swift run trackpad-area-customizer --config ./config.json --debug
 --config <path>         JSON rules file path (required)
 --max-touch-age-ms <ms>     クリック判定で使うタッチ情報の最大経過時間 (default: 120)
 --miss-click-history-seconds <s> missClickMargin 判定で使う履歴時間(秒) (default: 1.0)
+--highlight-status-item      対象エリアにタッチ中、メニューバー項目の色を変更
 --debug                     クリックイベントごとのデバッグログを出力
 --help
 ```

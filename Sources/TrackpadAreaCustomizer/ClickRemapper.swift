@@ -168,6 +168,7 @@ private enum InputActionPerformer {
 
 final class ClickRemapper {
     private let config: Config
+    private let touchState: TouchState
     private let tracker: MultitouchTracker
     private let decisionEngine: ClickDecisionEngine
 
@@ -184,6 +185,7 @@ final class ClickRemapper {
     init(config: Config) {
         self.config = config
         let touchState = TouchState()
+        self.touchState = touchState
         self.tracker = MultitouchTracker(touchState: touchState)
         self.decisionEngine = ClickDecisionEngine(config: config, touchState: touchState)
     }
@@ -224,10 +226,36 @@ final class ClickRemapper {
                 "marginRules=\(config.areaRules.filter { $0.missClickMargin > 0 }.count), " +
                 "maxTouchAgeMs=\(config.maxTouchAgeMillis), " +
                 String(format: "missClickHistoryWindowSec=%.3f, ", config.missClickHistoryWindowMillis / 1_000) +
+                "highlightStatusItem=\(config.highlightStatusItem), " +
                 "debug=\(config.debug)"
         )
 
         return true
+    }
+
+    func stop() {
+        if let eventTap {
+            CGEvent.tapEnable(tap: eventTap, enable: false)
+            CFMachPortInvalidate(eventTap)
+            self.eventTap = nil
+        }
+        if let source {
+            CFRunLoopRemoveSource(CFRunLoopGetCurrent(), source, .commonModes)
+            self.source = nil
+        }
+        pendingUpBehavior = .none
+        decisionEngine.resetMissClickPassthroughState()
+        tracker.stop()
+    }
+
+    func isTouchInsideAnyRuleArea() -> Bool {
+        guard let snapshot = touchState.recentSnapshot(maxAgeMillis: config.maxTouchAgeMillis) else {
+            return false
+        }
+
+        return config.areaRules.contains { rule in
+            rule.matches(x: snapshot.x, y: snapshot.y)
+        }
     }
 
     private func debugLog(_ message: String) {
@@ -298,5 +326,9 @@ final class ClickRemapper {
         }
         let remapper = Unmanaged<ClickRemapper>.fromOpaque(userInfo).takeUnretainedValue()
         return remapper.handleEvent(type: type, event: event)
+    }
+
+    deinit {
+        stop()
     }
 }

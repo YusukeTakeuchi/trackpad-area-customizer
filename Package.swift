@@ -16,6 +16,7 @@ let package = Package(
         .executableTarget(
             name: "TrackpadAreaCustomizer",
             linkerSettings: [
+                .linkedFramework("AppKit"),
                 .linkedFramework("ApplicationServices"),
                 .unsafeFlags([
                     "-F/System/Library/PrivateFrameworks",

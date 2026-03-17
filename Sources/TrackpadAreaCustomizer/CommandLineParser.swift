@@ -110,6 +110,7 @@ struct Config {
     let areaRules: [AreaRule]
     let maxTouchAgeMillis: Double
     let missClickHistoryWindowMillis: Double
+    let highlightStatusItem: Bool
     let debug: Bool
 
     static let defaultMaxTouchAgeMillis: Double = 120
@@ -119,6 +120,7 @@ struct Config {
     static func parse() -> Config {
         var maxTouchAgeMillis = Self.defaultMaxTouchAgeMillis
         var missClickHistoryWindowMillis = Self.defaultMissClickHistoryWindowMillis
+        var highlightStatusItem = false
         var debug = false
         var configPath: String?
 
@@ -157,6 +159,8 @@ struct Config {
                     failParse("Invalid value for --miss-click-history-seconds: \(value) (expected value > 0)")
                 }
                 missClickHistoryWindowMillis = seconds * 1_000
+            case "--highlight-status-item":
+                highlightStatusItem = true
             case "--debug":
                 debug = true
             case "--help":
@@ -184,6 +188,7 @@ struct Config {
             areaRules: areaRules,
             maxTouchAgeMillis: maxTouchAgeMillis,
             missClickHistoryWindowMillis: missClickHistoryWindowMillis,
+            highlightStatusItem: highlightStatusItem,
             debug: debug
         )
     }
@@ -631,6 +636,7 @@ private func printUsageAndExit(exitCode: Int32 = 0, toStderr: Bool = false) -> N
       --max-touch-age-ms <ms>     Max age of touch sample used for click mapping (default: 120)
       --miss-click-history-seconds <s>
                                  History window (seconds) used for miss-click margin detection (default: 1.0)
+      --highlight-status-item    Highlight menu bar item while touching inside any configured area
       --debug                     Print debug log for each click event
       --help                      Show this message
 
