@@ -4,6 +4,7 @@ import Foundation
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private let remapper: ClickRemapper
     private let shouldHighlightStatusItem: Bool
+    private let cursorMarker = CursorMarkerOverlay()
     private var statusItem: NSStatusItem?
     private var indicatorTimer: Timer?
     private var isStatusHighlighted = false
@@ -39,13 +40,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         self.statusItem = statusItem
         if shouldHighlightStatusItem {
             applyStatusButtonAppearance(isHighlighted: false)
-            startIndicatorUpdates()
         }
+        startIndicatorUpdates()
     }
 
     func applicationWillTerminate(_ notification: Notification) {
         indicatorTimer?.invalidate()
         indicatorTimer = nil
+        cursorMarker.hide()
         remapper.stop()
     }
 
@@ -70,12 +72,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func refreshStatusButtonHighlight() {
-        let shouldHighlight = remapper.isTouchInsideAnyRuleArea()
-        guard shouldHighlight != isStatusHighlighted else {
+        let isTouchingRuleArea = remapper.isTouchInsideAnyRuleArea()
+        cursorMarker.update(isVisible: isTouchingRuleArea)
+
+        guard shouldHighlightStatusItem else {
             return
         }
-        isStatusHighlighted = shouldHighlight
-        applyStatusButtonAppearance(isHighlighted: shouldHighlight)
+
+        guard isTouchingRuleArea != isStatusHighlighted else {
+            return
+        }
+        isStatusHighlighted = isTouchingRuleArea
+        applyStatusButtonAppearance(isHighlighted: isTouchingRuleArea)
     }
 
     private func applyStatusButtonAppearance(isHighlighted: Bool) {
